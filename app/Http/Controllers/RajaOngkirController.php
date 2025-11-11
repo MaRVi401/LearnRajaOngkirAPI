@@ -29,7 +29,7 @@ class RajaOngkirController extends Controller
     {
         // Mengambil nama kota asal untuk ditampilkan di view
         $originCityName = $this->getCityNameById($this->originCityId);
-        
+
         return view('ongkir', [
             'originCityName' => $originCityName ?? 'Indramayu (ID: ' . $this->originCityId . ')'
         ]);
@@ -57,17 +57,40 @@ class RajaOngkirController extends Controller
      */
     public function getCities($province_id)
     {
-        $response = Http::withHeaders([
-            'key' => $this->apiKey
-        ])->get($this->baseUrl . '/destination/city', [
-            'province_id' => $province_id
-        ]);
+        try {
+            $response = Http::withHeaders([
+                'key' => $this->apiKey
+            ])->get($this->baseUrl . '/destination/city', [
+                'province_id' => $province_id
+            ]);
 
-        if ($response->successful()) {
-            return response()->json($response->json()['data'] ?? []);
+            // Jika request berhasil (status 200-299)
+            if ($response->successful()) {
+                // Cek apakah 'data' ada dan tidak kosong
+                $data = $response->json()['data'] ?? null;
+                if (!empty($data)) {
+                    return response()->json($data);
+                } else {
+                    // Berhasil, tapi Komerce tidak mengirim data (mungkin province_id salah?)
+                    return response()->json(['error' => 'Data kota tidak ditemukan untuk provinsi ini.'], 404);
+                }
+            }
+
+            // --- INI BAGIAN DEBUGGING ---
+            // Jika request GAGAL (status 4xx atau 5xx)
+            // Kita ambil pesan error asli dari Komerce
+            $errorMessage = $response->json()['message'] ?? 'Gagal mengambil data kota. Tidak ada pesan error.';
+
+            // Kita kembalikan pesan error asli itu ke browser
+            // (Bersama dengan status code yang gagal, misal 401 - Unauthenticated)
+            return response()->json([
+                'error' => $errorMessage,
+                'response_body' => $response->json() // Kirim semua respons untuk debug
+            ], $response->status());
+        } catch (\Exception $e) {
+            // Tangkap jika ada error koneksi atau lainnya
+            return response()->json(['error' => $e->getMessage()], 500);
         }
-
-        return response()->json(['error' => 'Gagal mengambil data kota'], $response->status());
     }
 
     /**
@@ -96,10 +119,9 @@ class RajaOngkirController extends Controller
                 // 'data' berisi detail asal, tujuan, dan 'results'
                 return response()->json($response->json()['data'] ?? []);
             }
-            
+
             // Tangani jika API Komerce mengembalikan error (misal: 'data' not found)
             return response()->json(['error' => $response->json()['message'] ?? 'Gagal menghitung ongkir'], $response->status());
-
         } catch (ValidationException $e) {
             return response()->json(['error' => $e->errors()], 422);
         }
@@ -114,7 +136,7 @@ class RajaOngkirController extends Controller
             $response = Http::withHeaders([
                 'key' => $this->apiKey
             ])->get($this->baseUrl . '/destination/city', ['city_id' => $id]);
-            
+
             if ($response->successful() && isset($response->json()['data'][0])) {
                 $city = $response->json()['data'][0];
                 return $city['type'] . ' ' . $city['city_name'];
